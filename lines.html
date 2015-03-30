@@ -1,0 +1,196 @@
+<html>
+<head>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="leaflet.css" />
+  <script src="leaflet.js"></script>
+  <script src="turf.min.js" charset="utf-8"></script>
+  <script src="rbush.js" charset="utf-8"></script>
+  <script src="jquery-2.1.3.min.js"></script>
+  <script src="wellknown.js"></script>
+  <script src="store.min.js" charset="utf-8"></script>
+  <title>This ist an example</title>
+</head>
+<body>
+  <div id="map" style="height:70%;width:100%"></div>
+  <div id="info"></div>
+  <button type="button" onclick="manualLocate();">Geolocate</button>
+</body>
+
+
+<script>
+  var rb = rbush(9);
+  var map = L.map('map');
+  var osmUrl='http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+  var osm = new L.TileLayer(osmUrl);
+  map.addLayer(osm);
+  var mapElement;
+  var posMarker;
+  var currentStreet = "";
+  //var matchTable = {};
+  //loadMatchTable('webdata/zuordnung.csv');
+  
+  map.on('click', function(e) {
+    var clickPoint = [e.latlng.lng, e.latlng.lat];
+    //console.log(clickPoint);
+    var newStreet = pickStreet(clickPoint);
+    if (newStreet != '') currentStreet = newStreet;
+    $('#info').html(currentStreet);
+  });
+
+  function loadMatchTable(source){
+    logg("loading MatchTable");
+    $.get(source, function(data) {
+      logg("done loading MatchTable");
+    
+      logg("building MatchTable");
+      matchDataArray = data.split("\n");
+      //var matchTable = {};
+      for (var i=1;i<(matchDataArray.length-1);i++) {
+        var currentLine = matchDataArray[i].split(',');
+        //logg(currentLine[0]);
+        var rasterval = currentLine[2];
+        var streetName = currentLine[1];
+        matchTable[rasterval] = streetName;
+      };
+      logg("done building MatchTable");
+      //console.log(matchTable);
+    });
+  };
+
+  function makeBbox(wktString){
+    var geoJson = wellknown.parse(wktString);
+    //logg(geoJson);
+    var bbox = turf.extent(geoJson);
+    // 1° = 110 km  |  0.01° = 1000 m  |  0.00001° = 1m
+    var extendedBbox = [bbox[0]-0.0003,bbox[1]-0.0003,bbox[2]+0.0003,bbox[3]+0.0003]
+    return extendedBbox;
+  };
+  
+  function loadRtree(csvData, rbushtree){
+    logg("start building tree");
+    var loadData = []
+    dataArray = csvData.split("\n");
+    //logg(dataArray.length);
+    for (var i=1;i<(dataArray.length-1);i++) {
+      var currentLine = dataArray[i].split(';');
+      //logg(currentLine[0]);
+      var bbox = makeBbox(currentLine[0]);
+      loadData.push( bbox.concat( {WKTgeometry: currentLine[0], name: currentLine[1]} ));
+    };
+    rbushtree.load(loadData);
+    return rbushtree;
+  };
+
+  
+  function pickStreet(clickPoint) {
+    //var received = rt.bbox(clickPoint, clickPoint);
+    var received = rb.search( clickPoint.concat(clickPoint) );
+    //console.log(received);
+    //var received = rt.search({x: currentLoc[0], y: currentLoc[1], w:0, h:0});
+    
+    var foundReceived = [];
+    var foundNames = [];
+    for (var i=0;i<received.length;i++){
+      var feat = received[i];
+      var geojsonFeat = {type: "Feature", geometry: wellknown.parse(feat[4].WKTgeometry), properties: {} };
+      geojsonFeat.properties = {name: feat[4].name};
+      //geojsonFeat = {type: 'Feature',properties: {name: feat[4]}  , geometry: { type: 'Polygon', coordinates: [feat[0],feat[1],feat[2],feat[3]] }};
+      var geoJsonClick = {type: 'Feature', geometry: { type: 'Point', coordinates: clickPoint}};
+      var geoJsonFeatBuffers = turf.buffer(geojsonFeat,0.02,'kilometers');
+      for (var j=0;j<geoJsonFeatBuffers.features.length;j++) {
+        var isInside = turf.inside(geoJsonClick, geoJsonFeatBuffers.features[j]);
+        if (isInside) {
+          foundReceived.push(geoJsonFeatBuffers.features[j]);
+          foundNames.push(geojsonFeat.properties.name);
+        }
+      }
+    };
+    if (mapElement) map.removeLayer(mapElement);
+    mapElement = L.geoJson(foundReceived).addTo(map);
+    
+    /*
+    if (foundReceived.length > 0) {
+      var currentStreetName = foundNames[0];
+      console.log(currentStreetName);
+      return currentStreetName;
+    } else {
+      return "";
+    }
+    */
+    if (foundReceived.length > 0 & foundReceived.length < 2) {
+      var currentStreetName = foundNames[0];
+      //console.log(currentStreetName);
+      return currentStreetName;
+    } else {
+      return "";
+    }
+  };
+  
+  var streetLayer = 'data/lines_gen10_4+.csv';
+  var localData = store.get('lines_gen10_4a+n');
+  localData = undefined;
+  if (localData != undefined) {
+    // local data found, use it
+    logg("done loading, using local data");
+    
+    logg("building index");
+    //rt.geoJSON(localData);
+    rb = loadRtree(localData, rb);
+    main();
+  } else {
+    // no local data yet, transfer it remotely
+    logg("using external data");
+    
+    $.get(streetLayer, function(data) {
+      logg("done loading");
+      
+      //store.set('lines_gen10_4a+n', data);
+      logg("done saving");
+    
+      logg("building index");
+      rb = loadRtree(data, rb);
+      main();
+    }); 
+  }
+
+  function manualLocate(){
+    navigator.geolocation.getCurrentPosition( posUpdate );
+  };
+
+  function main(){
+    console.log(rb);
+    logg("starting main operation");
+    var currentLoc = [16.3875,48.2668];
+    
+    map.setView([currentLoc[1],currentLoc[0]], 13);
+    posMarker = L.marker([currentLoc[1],currentLoc[0]]).addTo(map);
+    
+    
+    var options = {
+      enableHighAccuracy: false,
+      maximumAge: 2000,
+    };
+    var watcher = navigator.geolocation.watchPosition( posUpdate, undefined, options );
+    //posUpdate({coords:{longitude: currentLoc[0], latitude: currentLoc[1]}});
+  };
+  
+  function posUpdate(pos) {
+    var coords = [pos.coords.longitude, pos.coords.latitude];
+    console.log(coords);
+    
+    if (posMarker) map.removeLayer(posMarker);
+    posMarker = L.marker([coords[1],coords[0]]).addTo(map);
+    map.setView([coords[1],coords[0]], 18);
+    
+    var newStreet = pickStreet(coords);
+    if (newStreet != '') currentStreet = newStreet;
+    $('#info').html(currentStreet);
+  };
+  
+  function logg(info){
+    console.log(info);
+    $('#info').html(info);
+  };
+
+</script>
+</html>
