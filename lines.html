@@ -8,7 +8,7 @@
   <script src="jquery-2.1.3.min.js"></script>
   <script src="wellknown.js"></script>
   <script src="store.min.js" charset="utf-8"></script>
-  <title>This ist an example</title>
+  <title>Prototypical HTML5 offline reverse-geocoder</title>
 </head>
 <body>
   <div id="map" style="height:70%;width:100%"></div>
@@ -29,6 +29,8 @@
   //var matchTable = {};
   //loadMatchTable('webdata/zuordnung.csv');
   
+  /* for manual testing, it will be possible to simulate a reverse-geocoding
+     by clicking on a location in the map */
   map.on('click', function(e) {
     var clickPoint = [e.latlng.lng, e.latlng.lat];
     //console.log(clickPoint);
@@ -37,6 +39,8 @@
     $('#info').html(currentStreet);
   });
 
+  /* if used, the table matching an ID value with the actual name of the
+     street is loaded here */
   function loadMatchTable(source){
     logg("loading MatchTable");
     $.get(source, function(data) {
@@ -57,6 +61,7 @@
     });
   };
 
+  /* build a boundingBox for a given WKT polygon */
   function makeBbox(wktString){
     var geoJson = wellknown.parse(wktString);
     //logg(geoJson);
@@ -66,6 +71,9 @@
     return extendedBbox;
   };
   
+  
+  /* Fill a given rTree with data from a CSV file. The first column of the
+     CSV has to contain a WKT polygon, the second column the name attribute. */
   function loadRtree(csvData, rbushtree){
     logg("start building tree");
     var loadData = []
@@ -81,7 +89,7 @@
     return rbushtree;
   };
 
-  
+  /* for a given location, the current street(s) are queried */
   function pickStreet(clickPoint) {
     //var received = rt.bbox(clickPoint, clickPoint);
     var received = rb.search( clickPoint.concat(clickPoint) );
@@ -107,16 +115,7 @@
     };
     if (mapElement) map.removeLayer(mapElement);
     mapElement = L.geoJson(foundReceived).addTo(map);
-    
-    /*
-    if (foundReceived.length > 0) {
-      var currentStreetName = foundNames[0];
-      console.log(currentStreetName);
-      return currentStreetName;
-    } else {
-      return "";
-    }
-    */
+
     if (foundReceived.length > 0 & foundReceived.length < 2) {
       var currentStreetName = foundNames[0];
       //console.log(currentStreetName);
@@ -125,47 +124,22 @@
       return "";
     }
   };
-  
-  var streetLayer = 'data/lines_gen10_4+.csv';
-  var localData = store.get('lines_gen10_4a+n');
-  localData = undefined;
-  if (localData != undefined) {
-    // local data found, use it
-    logg("done loading, using local data");
-    
-    logg("building index");
-    //rt.geoJSON(localData);
-    rb = loadRtree(localData, rb);
-    main();
-  } else {
-    // no local data yet, transfer it remotely
-    logg("using external data");
-    
-    $.get(streetLayer, function(data) {
-      logg("done loading");
-      
-      //store.set('lines_gen10_4a+n', data);
-      logg("done saving");
-    
-      logg("building index");
-      rb = loadRtree(data, rb);
-      main();
-    }); 
-  }
 
+  /* for the manual geolocate-button */
   function manualLocate(){
     navigator.geolocation.getCurrentPosition( posUpdate );
   };
-
+  
   function main(){
     console.log(rb);
     logg("starting main operation");
-    var currentLoc = [16.3875,48.2668];
     
+    // init the map
+    var currentLoc = [16.3875,48.2668];
     map.setView([currentLoc[1],currentLoc[0]], 13);
     posMarker = L.marker([currentLoc[1],currentLoc[0]]).addTo(map);
     
-    
+    // init geolocation
     var options = {
       enableHighAccuracy: false,
       maximumAge: 2000,
@@ -173,7 +147,8 @@
     var watcher = navigator.geolocation.watchPosition( posUpdate, undefined, options );
     //posUpdate({coords:{longitude: currentLoc[0], latitude: currentLoc[1]}});
   };
-  
+
+  /* gets executed each update of the position */
   function posUpdate(pos) {
     var coords = [pos.coords.longitude, pos.coords.latitude];
     console.log(coords);
@@ -184,13 +159,45 @@
     
     var newStreet = pickStreet(coords);
     if (newStreet != '') currentStreet = newStreet;
-    $('#info').html(currentStreet);
+    logg(currentStreet)
+    //$('#info').html(currentStreet);
   };
   
+  /* custom logging function */
   function logg(info){
     console.log(info);
     $('#info').html(info);
   };
+
+// **** MAN PART STARTS HERE ****
+
+  var streetLayer = 'data/lines_gen10_4+.csv';
+  var localData = store.get('lines_gen10_4a+n');
+  localData = undefined;   // the use of cached data is currently not enabled
+  if (localData != undefined) {
+    // local data found, use it
+    logg("done loading, using local data");
+    
+    logg("building index");
+    //rt.geoJSON(localData);
+    rb = loadRtree(localData, rb);
+  } else {
+    // no local data yet, transfer it remotely
+    logg("using external data");
+    
+    $.get(streetLayer, function(data) {
+      logg("done loading");
+      
+      //store.set('lines_gen10_4a+n', data);  // the use of cached data is currently not enabled
+      logg("done saving");
+    
+      logg("building index");
+      rb = loadRtree(data, rb);
+    }); 
+  }
+  main();
+
+// **** MAN PART ENDS HERE ****
 
 </script>
 </html>
